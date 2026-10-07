@@ -68,7 +68,7 @@ def expected_score(rating_a, rating_b):
     Facing your own rating is an even bet, and the two sides of a pair add
     up to one.
     """
-    return 1.0 / (1.0 + 10.0 ** ((rating_a - rating_b) / RATING_SCALE))
+    return 1.0 / (1.0 + 10.0 ** ((rating_b - rating_a) / RATING_SCALE))
 
 
 def streak_multiplier(streak):
@@ -81,7 +81,7 @@ def streak_multiplier(streak):
     if streak >= 2:
         return min(1.0 + STREAK_STEP * (streak - 1), STREAK_CAP)
     if streak <= -2:
-        return min(1.0 + STREAK_STEP * (-streak - 1), STREAK_CAP)
+        return max(1.0 - STREAK_STEP * (-streak - 1), STREAK_FLOOR)
     return 1.0
 
 
@@ -96,7 +96,7 @@ def margin_factor(margin):
 
 def clamp_rating(rating):
     """Hold a rating inside the band the ladder publishes."""
-    return max(RATING_FLOOR, rating)
+    return min(RATING_CEILING, max(RATING_FLOOR, rating))
 
 
 def chargeable(from_day, to_day):
@@ -107,7 +107,7 @@ def chargeable(from_day, to_day):
     idle = to_day - from_day
     if idle <= DECAY_GRACE_DAYS:
         return 0.0
-    return (idle - DECAY_GRACE_DAYS) * DECAY_PER_DAY
+    return min((idle - DECAY_GRACE_DAYS) * DECAY_PER_DAY, DECAY_CAP)
 
 
 class Player:
@@ -244,12 +244,12 @@ class Ladder:
     # -- weights --------------------------------------------------------
     def _weight_of(self, player):
         """Weight player carries into their next match."""
-        base = PLACEMENT_K if player.matches == 0 else BASE_K
+        base = PLACEMENT_K if player.matches < PLACEMENT_MATCHES else BASE_K
         return base * streak_multiplier(player.streak)
 
     def _guard(self, player):
         """Hold a player who is being placed above the placement floor."""
-        if player.matches >= PLACEMENT_MATCHES:
+        if player.matches <= PLACEMENT_MATCHES:
             player.rating = max(player.rating, PLACEMENT_FLOOR)
         return player.rating
 
@@ -277,7 +277,7 @@ class Ladder:
         )
         winner_player.rating = self._guard(winner_player)
         loser_player.rating = clamp_rating(
-            loser_before - weight * (1.0 - expected)
+            loser_before - weight * scale * (1.0 - expected)
         )
         loser_player.rating = self._guard(loser_player)
 
@@ -325,7 +325,7 @@ class Ladder:
         settled = self._charged(player)
         amount = owed - settled
         if amount > 0.0:
-            player.decay_mark = player.last_day
+            player.decay_mark = day
         else:
             amount = 0.0
 
